@@ -1,5 +1,5 @@
-import librosa
 import torch
+import torchaudio
 
 from utils import build_instruction, build_prompt, load_model_and_processor
 
@@ -8,6 +8,15 @@ SAMPLE_AUDIO = "sample.wav"
 SOURCE_LANG = "Vietnamese"
 TARGET_LANG = "English"
 MAX_NEW_TOKENS = 256
+
+
+def load_audio(audio_path, target_sample_rate):
+    waveform, sample_rate = torchaudio.load(audio_path)
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    if sample_rate != target_sample_rate:
+        waveform = torchaudio.functional.resample(waveform, sample_rate, target_sample_rate)
+    return waveform.squeeze(0).numpy()
 
 
 def run_task(model, processor, audio, task, source_lang, target_lang, max_new_tokens):
@@ -35,7 +44,7 @@ def run_task(model, processor, audio, task, source_lang, target_lang, max_new_to
 
 def main():
     model, processor = load_model_and_processor()
-    audio, _ = librosa.load(SAMPLE_AUDIO, sr=processor.audio_processor.sampling_rate)
+    audio = load_audio(SAMPLE_AUDIO, processor.audio_processor.sampling_rate)
 
     asr_instruction, asr_prediction = run_task(
         model,

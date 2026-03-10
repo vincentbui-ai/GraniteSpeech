@@ -1,13 +1,22 @@
 import argparse
 
-import librosa
 import torch
+import torchaudio
 
 from utils import (
     build_instruction,
     load_metadata_rows,
     load_model_and_processor,
 )
+
+
+def load_audio(audio_path, target_sample_rate):
+    waveform, sample_rate = torchaudio.load(audio_path)
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    if sample_rate != target_sample_rate:
+        waveform = torchaudio.functional.resample(waveform, sample_rate, target_sample_rate)
+    return waveform.squeeze(0).numpy()
 
 
 def parse_args():
@@ -27,10 +36,7 @@ def main():
     rows = load_metadata_rows(args.metadata, tokenizer=processor.tokenizer)
     row = rows[args.row_id]
 
-    audio, _ = librosa.load(
-        row["audio_filepath"],
-        sr=processor.audio_processor.sampling_rate,
-    )
+    audio = load_audio(row["audio_filepath"], processor.audio_processor.sampling_rate)
 
     prompt = row["prompt"]
     plain_instruction = build_instruction(row["task"], row["source_lang"], row["target_lang"])
