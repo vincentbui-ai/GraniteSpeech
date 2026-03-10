@@ -13,6 +13,65 @@ Current script layout:
 - `infer.py` for single-sample inference
 - `utils.py` for shared helpers
 
+## Quick Start
+
+### 1. Install dependencies
+
+Example with the existing `speech` conda environment:
+
+```bash
+conda activate speech
+pip install -q git+https://github.com/huggingface/transformers.git
+pip install -U -q datasets accelerate evaluate whisper tqdm librosa sentencepiece
+```
+
+### 2. Download the Granite Speech checkpoint locally
+
+Expected local model directory:
+
+```text
+models/granite-4.0-1b-speech/
+```
+
+The scripts automatically use the local model path above if it exists. Otherwise they fall back
+to `ibm-granite/granite-4.0-1b-speech` from Hugging Face.
+
+### 3. Prepare metadata
+
+Normalize raw metadata into a consistent JSONL schema:
+
+```bash
+python data.py --input datasets/metadata.json --output datasets/metadata.prepared.jsonl
+```
+
+### 4. Run inference for one sample
+
+```bash
+python infer.py --metadata datasets/metadata.json --row-id 0
+```
+
+### 5. Finetune the model
+
+```bash
+python train.py --metadata datasets/metadata.json --output-dir outputs/granite-finetune
+```
+
+Useful optional arguments:
+
+- `--val-ratio`
+- `--test-ratio`
+- `--epochs`
+- `--learning-rate`
+- `--train-batch-size`
+- `--eval-batch-size`
+
+## Script Responsibilities
+
+- `data.py`: validate and normalize JSONL metadata, infer missing task fields, and generate prompts
+- `train.py`: load metadata, build dataset splits, finetune the model, and report WER
+- `infer.py`: run one-sample inference from a metadata row
+- `utils.py`: shared model loading, dataset normalization, collator, and evaluation helpers
+
 The goal of this README is to define the metadata format clearly and keep the repository aligned
 around a single dataset contract.
 
@@ -200,6 +259,7 @@ You may also separate files by task or language direction, for example:
 - Granite Speech finetuning code should read `audio_filepath`, `prompt`, and `text` at minimum
 - `ori_text` and `tgt_text` should be preserved for traceability and downstream processing
 - If adding preprocessing scripts later, they should validate the schema before training
+- `train.py` freezes non-adapter parameters and only updates projector / LoRA-style layers
 
 ## Summary
 
