@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-import evaluate
 import torch
 import tqdm
 from datasets import Audio, Dataset
@@ -248,6 +247,8 @@ def normalize_text(text, target_lang):
 def compute_wer(model, processor, dataset, device, batch_size=16):
     if dataset is None or len(dataset) == 0:
         return None
+
+    import evaluate
 
     collator = GraniteCollator(processor, inference_mode=True)
     dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collator, num_workers=0)
