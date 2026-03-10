@@ -1,18 +1,13 @@
-import argparse
-
 import librosa
 import torch
 
 from utils import build_instruction, build_prompt, load_model_and_processor
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Smoke test ASR and AST inference for one wav file.")
-    parser.add_argument("--audio", required=True, help="Path to the wav/flac file.")
-    parser.add_argument("--source-lang", default="Vietnamese", help="Language spoken in the audio.")
-    parser.add_argument("--target-lang", default="English", help="Target language for AST.")
-    parser.add_argument("--max-new-tokens", type=int, default=256, help="Maximum generated tokens.")
-    return parser.parse_args()
+SAMPLE_AUDIO = "sample.wav"
+SOURCE_LANG = "Vietnamese"
+TARGET_LANG = "English"
+MAX_NEW_TOKENS = 256
 
 
 def run_task(model, processor, audio, task, source_lang, target_lang, max_new_tokens):
@@ -39,30 +34,29 @@ def run_task(model, processor, audio, task, source_lang, target_lang, max_new_to
 
 
 def main():
-    args = parse_args()
     model, processor = load_model_and_processor()
-    audio, _ = librosa.load(args.audio, sr=processor.audio_processor.sampling_rate)
+    audio, _ = librosa.load(SAMPLE_AUDIO, sr=processor.audio_processor.sampling_rate)
 
     asr_instruction, asr_prediction = run_task(
         model,
         processor,
         audio,
         task="asr",
-        source_lang=args.source_lang,
-        target_lang=args.source_lang,
-        max_new_tokens=args.max_new_tokens,
+        source_lang=SOURCE_LANG,
+        target_lang=SOURCE_LANG,
+        max_new_tokens=MAX_NEW_TOKENS,
     )
     ast_instruction, ast_prediction = run_task(
         model,
         processor,
         audio,
         task="ast",
-        source_lang=args.source_lang,
-        target_lang=args.target_lang,
-        max_new_tokens=args.max_new_tokens,
+        source_lang=SOURCE_LANG,
+        target_lang=TARGET_LANG,
+        max_new_tokens=MAX_NEW_TOKENS,
     )
 
-    print("audio:", args.audio)
+    print("audio:", SAMPLE_AUDIO)
     print("asr_instruction:", asr_instruction)
     print("asr_prediction:", asr_prediction)
     print("ast_instruction:", ast_instruction)
