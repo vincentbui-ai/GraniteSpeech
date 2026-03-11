@@ -256,26 +256,41 @@ def normalize_text(text, target_lang):
 def compute_wer(model, processor, dataset, device, batch_size=16):
     if dataset is None or len(dataset) == 0:
         return None
-
-    import evaluate
-
+    
+    is_distributed = torch.distributed.is_available() and torch.distributed.is_initialized()
+    
+    if is_distributed:
+        torch.distributed.barrier()
+        if torch.distributed.get_rank() != 0:
+            return None
+    
+    from torchmetrics.text import WordErrorRate
+    wer_metric = WordErrorRate()
+    
     collator = GraniteCollator(processor, inference_mode=True)
-    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collator, num_workers=0)
-    wer_metric = evaluate.load("wer")
-    model = model.eval().to(device)
-
+    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collator, num_workers=0, pin_memory=False)
+    model.eval()
+    
     predictions = []
     for batch in tqdm.tqdm(dataloader, desc="Running inference"):
-        batch = batch.to(device)
         with torch.inference_mode():
             outputs = model.generate(**batch, max_new_tokens=400, num_beams=4, early_stopping=True)
         prompt_length = batch.input_ids.shape[1]
         outputs = outputs[:, prompt_length:].cpu()
         for output in outputs:
             predictions.append(processor.tokenizer.decode(output, skip_special_tokens=True))
-
+    
     references = dataset["text"]
     target_langs = dataset["target_lang"]
     normalized_predictions = [normalize_text(text, lang) for text, lang in zip(predictions, target_langs)]
     normalized_references = [normalize_text(text, lang) for text, lang in zip(references, target_langs)]
-    return wer_metric.compute(references=normalized_references, predictions=normalized_predictions)
+    
+    # Calculate WER using torchmetrics
+    for ref, hyp in zip(normalized_references, normalized_predictions):
+        wer_metric.update(hyp, ref)
+    result = wer_metric.compute().item()
+    
+    if is_distributed:
+        torch.distributed.barrier()
+    
+    return result
