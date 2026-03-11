@@ -3,7 +3,6 @@ from pathlib import Path
 
 import torch
 import tqdm
-from datasets import Audio, Dataset
 from torch.utils.data import DataLoader
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.granite_speech import (
@@ -45,10 +44,11 @@ def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_M
 
 def build_instruction(task, source_lang, target_lang):
     if task == "asr":
-        if source_lang and source_lang.lower() != "english":
-            return f"Please transcribe the following {source_lang} audio to text<|audio|>"
-        return "Please transcribe the following audio to text<|audio|>"
-    return f"Please translate the following {source_lang} audio to {target_lang} text<|audio|>"
+        return "<|audio|>can you transcribe the speech into a written format?"
+
+    if target_lang:
+        return f"<|audio|>can you translate the speech into {target_lang}?"
+    return "<|audio|>can you translate the speech into English?"
 
 
 def build_prompt(tokenizer, task, source_lang, target_lang):
@@ -148,6 +148,8 @@ def write_jsonl(file_path, rows):
 
 
 def build_dataset(rows, processor, skip_missing_audio=True):
+    from datasets import Audio, Dataset
+
     records = []
     for row in rows:
         audio_path = Path(row["audio_filepath"])
