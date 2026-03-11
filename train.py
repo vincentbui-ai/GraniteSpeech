@@ -1,4 +1,6 @@
 import argparse
+import os
+import re
 
 import torch
 from transformers import Trainer, TrainingArguments
@@ -11,6 +13,21 @@ from utils import (
 )
 
 
+def find_latest_checkpoint(output_dir):
+    """Find checkpoint with highest step number."""
+    if not os.path.exists(output_dir):
+        return None
+    checkpoints = []
+    for name in os.listdir(output_dir):
+        if name.startswith("checkpoint-"):
+            try:
+                step = int(name.split("-")[1])
+                checkpoints.append((step, os.path.join(output_dir, name)))
+            except (IndexError, ValueError):
+                continue
+    return max(checkpoints)[1] if checkpoints else None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Finetune Granite Speech from metadata JSONL.")
     parser.add_argument("--train-files", nargs="+", required=True, help="Train JSONL files.")
@@ -21,6 +38,10 @@ def parse_args():
     parser.add_argument("--train-batch-size", type=int, default=8, help="Train batch size per device.")
     parser.add_argument("--eval-batch-size", type=int, default=8, help="Eval batch size per device.")
     parser.add_argument("--gradient-accumulation-steps", type=int, default=2)
+    parser.add_argument("--save-steps", type=int, default=10000, help="Save checkpoint every N steps")
+    parser.add_argument("--save-total-limit", type=int, default=3, help="Keep only N most recent checkpoints")
+    parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
+    parser.add_argument("--resume-from", type=str, default="", help="Resume from specific checkpoint path")
     return parser.parse_args()
 
 
@@ -43,7 +64,10 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
         bf16=torch.cuda.is_available(),
         fp16=False,
         eval_strategy="steps" if len(val_dataset) > 0 else "no",
-        save_strategy="no",
+        save_strategy="steps",
+        save_steps=args.save_steps,
+        save_total_limit=args.save_total_limit,
+        save_safetensors=True,
         eval_steps=0.1,
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.eval_batch_size,
@@ -91,7 +115,20 @@ def main():
 
     print("[4/5] Starting training...")
     trainer = build_trainer(model, processor, train_dataset, val_dataset, args)
-    trainer.train()
+    
+    # Determine checkpoint to resume from
+    checkpoint = None
+    if args.resume_from:
+        checkpoint = args.resume_from
+        print(f"[INFO] Resuming from specified checkpoint: {checkpoint}")
+    elif args.resume:
+        checkpoint = find_latest_checkpoint(args.output_dir)
+        if checkpoint:
+            print(f"[INFO] Resuming from latest checkpoint: {checkpoint}")
+        else:
+            print("[INFO] No checkpoint found, starting from scratch")
+    
+    trainer.train(resume_from_checkpoint=checkpoint)
     print("[4/5] Training completed")
 
     print("[5/5] Saving model...")

@@ -13,4 +13,6 @@ torchrun --nproc_per_node=${NUM_GPUS} train.py \
   --epochs 3.0 \
   --train-batch-size 4 \
   --eval-batch-size 4 \
-  --gradient-accumulation-steps 2
+  --gradient-accumulation-steps 2 \
+  --save-steps 10000 \
+  --save-total-limit 3
