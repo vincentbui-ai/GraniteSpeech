@@ -253,7 +253,7 @@ def normalize_text(text, target_lang):
     return " ".join(text.lower().strip().split())
 
 
-def compute_wer(model, processor, dataset, device, batch_size=16):
+def compute_wer(model, processor, dataset, batch_size=16):
     if dataset is None or len(dataset) == 0:
         return None
     
@@ -263,16 +263,25 @@ def compute_wer(model, processor, dataset, device, batch_size=16):
         torch.distributed.barrier()
         if torch.distributed.get_rank() != 0:
             return None
+        
+        # Unwrap DDP model và load lại trên 1 GPU
+        if hasattr(model, 'module'):
+            model = model.module
     
     from torchmetrics.text import WordErrorRate
     wer_metric = WordErrorRate()
     
-    collator = GraniteCollator(processor, inference_mode=True)
-    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collator, num_workers=0, pin_memory=False)
+    # Load model trên GPU 0 duy nhất cho inference
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device)
     model.eval()
+    
+    collator = GraniteCollator(processor, inference_mode=True)
+    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collator, num_workers=0)
     
     predictions = []
     for batch in tqdm.tqdm(dataloader, desc="Running inference"):
+        batch = batch.to(device)
         with torch.inference_mode():
             outputs = model.generate(**batch, max_new_tokens=400, num_beams=4, early_stopping=True)
         prompt_length = batch.input_ids.shape[1]
@@ -285,7 +294,6 @@ def compute_wer(model, processor, dataset, device, batch_size=16):
     normalized_predictions = [normalize_text(text, lang) for text, lang in zip(predictions, target_langs)]
     normalized_references = [normalize_text(text, lang) for text, lang in zip(references, target_langs)]
     
-    # Calculate WER using torchmetrics
     for ref, hyp in zip(normalized_references, normalized_predictions):
         wer_metric.update(hyp, ref)
     result = wer_metric.compute().item()
