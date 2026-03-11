@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -155,9 +157,30 @@ def write_jsonl(file_path, rows):
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def build_dataset(rows, processor, skip_missing_audio=True):
-    from datasets import Audio, Dataset
+def compute_dataset_hash(file_paths):
+    """Compute hash of input files for cache invalidation."""
+    import hashlib
+    hasher = hashlib.md5()
+    for path in sorted(file_paths if isinstance(file_paths, list) else [file_paths]):
+        if os.path.exists(path):
+            hasher.update(open(path, 'rb').read())
+    return hasher.hexdigest()[:8]
 
+
+def build_dataset(rows, processor, skip_missing_audio=True, cache_dir=None, source_files=None):
+    from datasets import Audio, Dataset
+    
+    # Check for cached dataset
+    if cache_dir and source_files:
+        cache_dir = Path(cache_dir)
+        hash_str = compute_dataset_hash(source_files)
+        cache_path = cache_dir / f"dataset_{hash_str}"
+        
+        if cache_path.exists():
+            print(f"[INFO] Loading cached dataset from {cache_path}")
+            dataset = Dataset.load_from_disk(str(cache_path))
+            return dataset
+    
     records = []
     for row in tqdm.tqdm(rows, desc="Building dataset", unit="sample"):
         audio_path = Path(row["audio_filepath"])
@@ -171,6 +194,16 @@ def build_dataset(rows, processor, skip_missing_audio=True):
 
     dataset = Dataset.from_list(records)
     dataset = dataset.cast_column("audio", Audio(sampling_rate=processor.audio_processor.sampling_rate))
+    
+    # Save to cache
+    if cache_dir and source_files:
+        cache_dir = Path(cache_dir)
+        hash_str = compute_dataset_hash(source_files)
+        cache_path = cache_dir / f"dataset_{hash_str}"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[INFO] Saving dataset cache to {cache_path}")
+        dataset.save_to_disk(str(cache_path))
+    
     return dataset
 
 
