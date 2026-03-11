@@ -40,6 +40,11 @@ def freeze_non_adapter_params(model):
 
 def build_trainer(model, processor, train_dataset, val_dataset, args):
     freeze_non_adapter_params(model)
+    
+    # Calculate warmup_steps from warmup_ratio (0.2 = 20% of total steps)
+    total_steps = (len(train_dataset) // (args.train_batch_size * args.gradient_accumulation_steps)) * args.epochs
+    warmup_steps = int(total_steps * 0.2)
+    
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         remove_unused_columns=False,
@@ -53,7 +58,7 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
         per_device_eval_batch_size=args.eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.epochs,
-        warmup_ratio=0.2,
+        warmup_steps=warmup_steps,
         logging_steps=0.1,
         learning_rate=args.learning_rate,
         dataloader_num_workers=16,
