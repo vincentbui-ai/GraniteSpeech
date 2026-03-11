@@ -4,3 +4,4 @@ AGENTS.md
 __pycache__/
 *.py[cod]
 fine_tuning_granite_speech.ipynb
+Qwen3-ASR
