@@ -67,7 +67,6 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
         save_strategy="steps",
         save_steps=args.save_steps,
         save_total_limit=args.save_total_limit,
-        save_safetensors=True,
         eval_steps=0.1,
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.eval_batch_size,
