@@ -1,4 +1,9 @@
 import argparse
+import os
+
+# Force single GPU to avoid DataParallel issues
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import torch
 from transformers import Trainer, TrainingArguments
@@ -75,7 +80,7 @@ def load_and_merge(files, processor):
 
 def setup_device(args):
     if args.device == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return "cuda:0" if torch.cuda.is_available() else "cpu"
     return args.device
 
 
