@@ -79,11 +79,17 @@ python train.py \
 
 ### 5. Evaluate
 
+**Single GPU:**
 ```bash
 python infer.py \
   --checkpoint outputs/granite-finetune/checkpoint-10000 \
   --metadata datasets/test.jsonl \
   --output results.json
+```
+
+**Multi GPU:**
+```bash
+bash infer_multi_gpu.sh
 ```
 
 Output includes WER and BLEU scores.
@@ -93,7 +99,6 @@ Output includes WER and BLEU scores.
 - **Multi-GPU training** with `torchrun`
 - **Checkpoint saving** every N steps with automatic cleanup
 - **Resume training** from any checkpoint
-- **Dataset caching** for faster subsequent runs
 - **WER & BLEU evaluation** on test sets
 
 ## Training Arguments
@@ -108,7 +113,6 @@ Output includes WER and BLEU scores.
 | `--learning-rate` | `3e-5` | Learning rate |
 | `--save-steps` | `10000` | Save checkpoint every N steps |
 | `--save-total-limit` | `3` | Keep only N recent checkpoints |
-| `--cache-dir` | `.cache/datasets` | Dataset cache directory |
 | `--resume` | - | Resume from latest checkpoint |
 | `--resume-from` | - | Resume from specific checkpoint |
 
@@ -149,9 +153,6 @@ JSONL format with one sample per line:
 ## Environment Variables
 
 ```bash
-# Cache directory for preprocessed datasets
-export CACHE_DIR="/path/to/large/disk/cache"
-
 # GPU selection (for single GPU training)
 export CUDA_VISIBLE_DEVICES=0
 ```
@@ -160,5 +161,4 @@ export CUDA_VISIBLE_DEVICES=0
 
 - Training freezes base model and only updates projector/LoRA layers
 - Dataset preprocessing includes prompt generation and audio path validation
-- Use `--cache-dir` to speed up repeated training runs
 - Checkpoints are saved in `checkpoint-{step}` subdirectories

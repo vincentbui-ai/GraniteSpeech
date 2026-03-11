@@ -42,7 +42,6 @@ def parse_args():
     parser.add_argument("--save-total-limit", type=int, default=3, help="Keep only N most recent checkpoints")
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
     parser.add_argument("--resume-from", type=str, default="", help="Resume from specific checkpoint path")
-    parser.add_argument("--cache-dir", type=str, default=".cache/datasets", help="Directory to cache preprocessed datasets")
     return parser.parse_args()
 
 
@@ -92,11 +91,11 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
     )
 
 
-def load_and_merge(files, processor, cache_dir=None):
+def load_and_merge(files, processor):
     rows = []
     for f in files:
         rows.extend(load_metadata_rows(f, tokenizer=processor.tokenizer))
-    return build_dataset(rows, processor, cache_dir=cache_dir, source_files=files)
+    return build_dataset(rows, processor)
 
 
 def main():
@@ -107,11 +106,11 @@ def main():
     print(f"[1/5] Model loaded successfully")
 
     print("[2/5] Loading training dataset...")
-    train_dataset = load_and_merge(args.train_files, processor, cache_dir=args.cache_dir)
+    train_dataset = load_and_merge(args.train_files, processor)
     print(f"[2/5] Training samples: {len(train_dataset)}")
 
     print("[3/5] Loading validation dataset...")
-    val_dataset = load_and_merge(args.val_files, processor, cache_dir=args.cache_dir)
+    val_dataset = load_and_merge(args.val_files, processor)
     print(f"[3/5] Validation samples: {len(val_dataset)}")
 
     print("[4/5] Starting training...")
