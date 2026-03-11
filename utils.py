@@ -159,7 +159,7 @@ def build_dataset(rows, processor, skip_missing_audio=True):
     from datasets import Audio, Dataset
 
     records = []
-    for row in rows:
+    for row in tqdm.tqdm(rows, desc="Building dataset", unit="sample"):
         audio_path = Path(row["audio_filepath"])
         if skip_missing_audio and not audio_path.exists():
             continue
