@@ -1,268 +1,164 @@
-# Granite Speech Metadata
+# Granite Speech Finetuning
 
-This repository focuses on dataset metadata for fine-tuning
-`ibm-granite/granite-4.0-1b-speech` on:
+This repository provides tools for finetuning `ibm-granite/granite-4.0-1b-speech` on Automatic Speech Recognition (ASR) and Automatic Speech Translation (AST) tasks.
 
-- ASR: speech -> transcript in the same language
-- AST: speech -> translated text in the target language
+## Supported Tasks
 
-Current script layout:
+### ASR (Automatic Speech Recognition)
+- Input: Speech audio
+- Output: Transcript in the same language
+- Example: Vietnamese speech → Vietnamese text
 
-- `data.py` for metadata normalization and preparation
-- `train.py` for finetuning
-- `infer.py` for single-sample inference
-- `utils.py` for shared helpers
+### AST (Automatic Speech Translation)  
+- Input: Speech audio
+- Output: Translated text in target language
+- Example: Vietnamese speech → English text
+
+## Repository Structure
+
+```
+├── train.py                 # Main training script
+├── train_single_gpu.sh      # Single GPU training script
+├── train_multi_gpu.sh       # Multi GPU training script  
+├── infer.py                 # Inference and evaluation (WER, BLEU)
+├── data.py                  # Metadata preprocessing
+├── utils.py                 # Shared utilities (collator, metrics, etc.)
+├── datasets/                # Dataset directory
+└── models/                  # Local model directory
+```
 
 ## Quick Start
 
-### 1. Install dependencies
-
-Example with the existing `speech` conda environment:
+### 1. Install Dependencies
 
 ```bash
-conda activate speech
+conda activate speech  # or your environment
 pip install -q git+https://github.com/huggingface/transformers.git
-pip install -U -q datasets accelerate evaluate whisper tqdm librosa sentencepiece
+pip install -U -q datasets accelerate evaluate whisper tqdm librosa torchmetrics
 ```
 
-### 2. Download the Granite Speech checkpoint locally
+### 2. Download Model
 
-Expected local model directory:
+Download Granite Speech checkpoint to local directory:
 
 ```text
 models/granite-4.0-1b-speech/
 ```
 
-The scripts automatically use the local model path above if it exists. Otherwise they fall back
-to `ibm-granite/granite-4.0-1b-speech` from Hugging Face.
+Scripts will use local model if available, otherwise fall back to Hugging Face.
 
-### 3. Prepare metadata
+### 3. Prepare Data
 
-Normalize raw metadata into a consistent JSONL schema:
-
-```bash
-python data.py --input datasets/metadata.json --output datasets/metadata.prepared.jsonl
-```
-
-### 4. Run inference for one sample
+Format your data as JSONL with required fields (see Metadata Format section).
 
 ```bash
-python infer.py --metadata datasets/metadata.json --row-id 0
+python data.py --input datasets/raw.json --output datasets/train.jsonl
 ```
 
-### 5. Finetune the model
+### 4. Train
+
+**Single GPU:**
+```bash
+bash train_single_gpu.sh
+```
+
+**Multi GPU (4 GPUs):**
+```bash
+bash train_multi_gpu.sh
+```
+
+**Custom training:**
+```bash
+python train.py \
+  --train-files datasets/train.jsonl \
+  --val-files datasets/val.jsonl \
+  --output-dir outputs/granite-finetune \
+  --epochs 3.0 \
+  --train-batch-size 16
+```
+
+### 5. Evaluate
 
 ```bash
-python train.py --metadata datasets/metadata.json --output-dir outputs/granite-finetune
+python infer.py \
+  --checkpoint outputs/granite-finetune/checkpoint-10000 \
+  --metadata datasets/test.jsonl \
+  --output results.json
 ```
 
-Useful optional arguments:
+Output includes WER and BLEU scores.
 
-- `--val-ratio`
-- `--test-ratio`
-- `--epochs`
-- `--learning-rate`
-- `--train-batch-size`
-- `--eval-batch-size`
+## Features
 
-## Script Responsibilities
+- **Multi-GPU training** with `torchrun`
+- **Checkpoint saving** every N steps with automatic cleanup
+- **Resume training** from any checkpoint
+- **Dataset caching** for faster subsequent runs
+- **WER & BLEU evaluation** on test sets
 
-- `data.py`: validate and normalize JSONL metadata, infer missing task fields, and generate prompts
-- `train.py`: load metadata, build dataset splits, finetune the model, and report WER
-- `infer.py`: run one-sample inference from a metadata row
-- `utils.py`: shared model loading, dataset normalization, collator, and evaluation helpers
+## Training Arguments
 
-The goal of this README is to define the metadata format clearly and keep the repository aligned
-around a single dataset contract.
-
-## Supported Tasks
-
-### ASR
-
-Automatic Speech Recognition uses spoken audio as input and produces text in the same language.
-
-Examples:
-
-- Vietnamese speech -> Vietnamese transcript
-- English speech -> English transcript
-
-### AST
-
-Automatic Speech Translation uses spoken audio as input and produces translated text in a
-different language.
-
-Examples:
-
-- Vietnamese speech -> English text
-- English speech -> Vietnamese text
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--train-files` | required | Training JSONL files |
+| `--val-files` | required | Validation JSONL files |
+| `--output-dir` | `outputs/granite-finetune` | Output directory |
+| `--epochs` | `1.0` | Training epochs |
+| `--train-batch-size` | `8` | Batch size per device |
+| `--learning-rate` | `3e-5` | Learning rate |
+| `--save-steps` | `10000` | Save checkpoint every N steps |
+| `--save-total-limit` | `3` | Keep only N recent checkpoints |
+| `--cache-dir` | `.cache/datasets` | Dataset cache directory |
+| `--resume` | - | Resume from latest checkpoint |
+| `--resume-from` | - | Resume from specific checkpoint |
 
 ## Metadata Format
 
-Dataset metadata should be stored in JSONL format.
-
-- One JSON object per line
-- UTF-8 encoding
-- Each line represents one training or evaluation sample
-
-## Required Fields
-
-Each sample must contain the following fields:
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `audio_filepath` | `string` | yes | Absolute or repo-relative path to the audio file |
-| `duration` | `float` | yes | Audio duration in seconds |
-| `task` | `string` | yes | Task name: `asr` or `ast` |
-| `source_lang` | `string` | yes | Language spoken in the audio |
-| `target_lang` | `string` | yes | Output text language |
-| `prompt` | `string` | yes | Instruction prompt given to the model |
-| `text` | `string` | yes | Expected output text for the task |
-| `ori_text` | `string` | no | Original transcript of the source speech |
-| `tgt_text` | `string` | no | Target translation text |
-| `split` | `string` | no | Dataset split such as `train`, `validation`, or `test` |
-| `speaker_id` | `string` | no | Speaker identifier if available |
-| `sample_id` | `string` | no | Stable unique sample identifier |
-
-## Field Rules
-
-### `audio_filepath`
-
-- Must point to a single audio file for the sample
-- Prefer consistent path style across the dataset
-- Supported audio is typically `.wav` or `.flac`
-
-### `duration`
-
-- Store as seconds
-- Use numeric values, not strings
-- Keep enough precision for filtering and batching
-
-### `task`
-
-Allowed values:
-
-- `asr`
-- `ast`
-
-### `source_lang` and `target_lang`
-
-- Use consistent language naming across the full dataset
-- Recommended values for this project: `Vietnamese`, `English`
-- For ASR, `source_lang` and `target_lang` are usually the same
-- For AST, `source_lang` and `target_lang` are different
-
-### `prompt`
-
-The prompt should make the task explicit.
-
-Recommended prompt patterns:
-
-- ASR English: `Please transcribe the following audio to text<|audio|>`
-- ASR Vietnamese: `Please transcribe the following Vietnamese audio to text<|audio|>`
-- AST VI -> EN: `Please translate the following Vietnamese audio to English text<|audio|>`
-- AST EN -> VI: `Please translate the following English audio to Vietnamese text<|audio|>`
-
-### `text`
-
-- This is the final training target used by the model
-- For ASR, `text` should be the transcript
-- For AST, `text` should be the translation
-
-### `ori_text`
-
-- Use for the original transcript when it exists
-- Strongly recommended for AST
-- Optional for ASR, but useful for consistency
-
-### `tgt_text`
-
-- Use for the translated text when it exists
-- Required in practice for AST data creation
-- Optional for ASR, where it may match `text` or be omitted
-
-## Recommended Task Templates
-
-### Template for ASR
+JSONL format with one sample per line:
 
 ```json
 {
-  "audio_filepath": "datasets/audio/example.wav",
+  "audio_filepath": "datasets/audio/sample.wav",
   "duration": 4.21,
   "task": "asr",
   "source_lang": "Vietnamese",
   "target_lang": "Vietnamese",
-  "prompt": "Please transcribe the following Vietnamese audio to text<|audio|>",
-  "text": "xin chao moi nguoi",
-  "ori_text": "xin chao moi nguoi",
-  "split": "train",
-  "sample_id": "vi_asr_000001"
+  "prompt": "Please transcribe the following audio to text<|audio|>",
+  "text": "xin chào mọi ngườii",
+  "split": "train"
 }
 ```
 
-### Template for AST
+### Required Fields
 
-```json
-{
-  "audio_filepath": "datasets/audio/example.wav",
-  "duration": 4.21,
-  "task": "ast",
-  "source_lang": "Vietnamese",
-  "target_lang": "English",
-  "prompt": "Please translate the following Vietnamese audio to English text<|audio|>",
-  "text": "hello everyone",
-  "ori_text": "xin chao moi nguoi",
-  "tgt_text": "hello everyone",
-  "split": "train",
-  "sample_id": "vi_en_ast_000001"
-}
+- `audio_filepath`: Path to audio file
+- `duration`: Audio duration in seconds  
+- `task`: `asr` or `ast`
+- `source_lang`: Source language (e.g., `Vietnamese`, `English`)
+- `target_lang`: Target language
+- `prompt`: Instruction prompt with `<|audio|>` token
+- `text`: Expected output text
+
+### Optional Fields
+
+- `ori_text`: Original transcript
+- `tgt_text`: Target translation  
+- `split`: `train`, `validation`, or `test`
+- `sample_id`: Unique identifier
+
+## Environment Variables
+
+```bash
+# Cache directory for preprocessed datasets
+export CACHE_DIR="/path/to/large/disk/cache"
+
+# GPU selection (for single GPU training)
+export CUDA_VISIBLE_DEVICES=0
 ```
 
-## Minimal Task Mapping
+## Notes
 
-Use the fields below as the canonical interpretation:
-
-| Task | Audio language | `text` meaning | `ori_text` | `tgt_text` |
-|---|---|---|---|---|
-| ASR | source language | transcript | recommended | optional |
-| AST | source language | translation | recommended | recommended |
-
-## Dataset Organization
-
-Recommended layout:
-
-```text
-datasets/
-  train.jsonl
-  validation.jsonl
-  test.jsonl
-  audio/
-```
-
-You may also separate files by task or language direction, for example:
-
-- `train_asr_vi.jsonl`
-- `train_asr_en.jsonl`
-- `train_ast_vi_en.jsonl`
-- `train_ast_en_vi.jsonl`
-
-## Data Quality Guidelines
-
-- Keep language labels consistent
-- Keep prompts consistent for the same task type
-- Do not mix transcript and translation in the same `text` field semantics
-- Ensure `duration` matches the actual audio
-- Remove samples with missing audio or empty targets
-- Keep `sample_id` stable if data is regenerated
-
-## Notes For Finetuning
-
-- Granite Speech finetuning code should read `audio_filepath`, `prompt`, and `text` at minimum
-- `ori_text` and `tgt_text` should be preserved for traceability and downstream processing
-- If adding preprocessing scripts later, they should validate the schema before training
-- `train.py` freezes non-adapter parameters and only updates projector / LoRA-style layers
-
-## Summary
-
-This project README intentionally keeps only the metadata contract for Granite Speech fine-tuning.
-If scripts, configs, or training workflows are added later, keep them in separate documentation
-and preserve this file as the source of truth for dataset metadata.
+- Training freezes base model and only updates projector/LoRA layers
+- Dataset preprocessing includes prompt generation and audio path validation
+- Use `--cache-dir` to speed up repeated training runs
+- Checkpoints are saved in `checkpoint-{step}` subdirectories
