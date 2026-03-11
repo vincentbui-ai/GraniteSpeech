@@ -34,14 +34,15 @@ def load_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME)
     return GraniteSpeechProcessor.from_pretrained(model_source)
 
 
-def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME, device_map="cuda:0"):
+def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME, device_map=None):
     model_source = resolve_model_source(model_path=model_path, model_name=model_name)
     processor = GraniteSpeechProcessor.from_pretrained(model_source)
     
     load_kwargs = {}
     if torch.cuda.is_available():
         load_kwargs["torch_dtype"] = torch.bfloat16
-        load_kwargs["device_map"] = device_map
+        if device_map:
+            load_kwargs["device_map"] = device_map
     else:
         load_kwargs["torch_dtype"] = torch.float32
     
