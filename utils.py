@@ -34,11 +34,18 @@ def load_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME)
     return GraniteSpeechProcessor.from_pretrained(model_source)
 
 
-def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME):
+def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME, device_map="auto"):
     model_source = resolve_model_source(model_path=model_path, model_name=model_name)
     processor = GraniteSpeechProcessor.from_pretrained(model_source)
-    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-    model = GraniteSpeechForConditionalGeneration.from_pretrained(model_source, dtype=dtype)
+    
+    load_kwargs = {}
+    if torch.cuda.is_available():
+        load_kwargs["torch_dtype"] = torch.bfloat16
+        load_kwargs["device_map"] = device_map
+    else:
+        load_kwargs["torch_dtype"] = torch.float32
+    
+    model = GraniteSpeechForConditionalGeneration.from_pretrained(model_source, **load_kwargs)
     return model, processor
 
 
