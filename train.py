@@ -53,6 +53,8 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
         learning_rate=args.learning_rate,
         dataloader_num_workers=16,
         data_seed=42,
+        ddp_find_unused_parameters=False,
+        dataloader_drop_last=False,
     )
     return Trainer(
         model=model,
@@ -85,7 +87,8 @@ def main():
     
     print("[1/7] Loading model and processor...")
     model, processor = load_model_and_processor()
-    print("[1/7] Model loaded successfully")
+    model = model.to(device)
+    print(f"[1/7] Model loaded successfully on {device}")
     
     print("[2/7] Loading training dataset...")
     train_dataset = load_and_merge(args.train_files, processor)
