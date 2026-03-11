@@ -34,7 +34,7 @@ def load_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME)
     return GraniteSpeechProcessor.from_pretrained(model_source)
 
 
-def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME, device_map="auto"):
+def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME, device_map="cuda:0"):
     model_source = resolve_model_source(model_path=model_path, model_name=model_name)
     processor = GraniteSpeechProcessor.from_pretrained(model_source)
     

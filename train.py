@@ -101,7 +101,7 @@ def main():
     print(f"[4/7] Test samples: {len(test_dataset)}")
     
     print(f"[5/7] Computing WER before finetuning...")
-    wer_before = compute_wer(model, processor, test_dataset, device, batch_size=args.eval_batch_size)
+    wer_before = compute_wer(model, processor, test_dataset, batch_size=args.eval_batch_size)
     if wer_before is not None:
         print(f"[5/7] WER before finetuning: {wer_before * 100:.3f}%")
     else:
@@ -118,7 +118,7 @@ def main():
     print(f"[6/7] Model saved to {args.output_dir}")
     
     print("[7/7] Computing WER after finetuning...")
-    wer_after = compute_wer(model, processor, test_dataset, device, batch_size=args.eval_batch_size)
+    wer_after = compute_wer(model, processor, test_dataset, batch_size=args.eval_batch_size)
     if wer_after is not None:
         print(f"[7/7] WER after finetuning: {wer_after * 100:.3f}%")
         if wer_before is not None:
