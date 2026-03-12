@@ -1,17 +1,15 @@
 import argparse
 import json
 import os
+import itertools
 from pathlib import Path
 
 import torch
 import torchaudio
 import torch.distributed as dist
-from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 
 from utils import (
-    GraniteCollator,
-    build_dataset,
     load_metadata_rows,
     load_model_and_processor,
     normalize_text,
@@ -39,108 +37,75 @@ def cleanup_distributed():
         dist.destroy_process_group()
 
 
-def load_audio(audio_path, target_sample_rate):
+def prepare_audio(audio_path, target_sample_rate=16000):
+    """Load and preprocess audio file."""
     waveform, sample_rate = torchaudio.load(audio_path)
     if waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
     if sample_rate != target_sample_rate:
         waveform = torchaudio.functional.resample(waveform, sample_rate, target_sample_rate)
-    return waveform.squeeze(0).numpy()
+    return waveform.squeeze(0)
 
 
-def compute_metrics_distributed(model, processor, dataset, batch_size=16, rank=0, world_size=1):
-    """Compute WER and BLEU scores for the dataset using distributed inference."""
-    if dataset is None or len(dataset) == 0:
-        return None, None
+def run_inference(model, processor, rows, batch_size, rank, world_size, device):
+    """Run inference on dataset split across ranks."""
+    # Split dataset indices by rank
+    indices = list(range(len(rows)))
+    indices = indices[rank::world_size]
     
-    device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
-    model = model.to(device)
+    # Split into batches
+    batches = [
+        indices[i:i + batch_size]
+        for i in range(0, len(indices), batch_size)
+    ]
+    
+    # Show progress only on rank 0
+    if rank == 0:
+        print(f"[INFO] Rank {rank} processing {len(indices)} samples ({len(batches)} batches)")
+        batches = tqdm(batches, desc=f"Rank {rank}")
+    
+    results = []
     model.eval()
     
-    # Setup distributed sampler if multi-GPU
-    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank) if world_size > 1 else None
-    
-    collator = GraniteCollator(processor, inference_mode=True)
-    dataloader = DataLoader(
-        dataset, 
-        batch_size=batch_size, 
-        sampler=sampler,
-        collate_fn=collator, 
-        num_workers=0,
-        shuffle=False
-    )
-    
-    # Collect predictions on this rank
-    local_predictions = []
-    
-    if rank == 0:
-        print(f"[INFO] Running distributed inference on {len(dataset)} samples with {world_size} GPUs...")
-    
-    # Synchronize before starting inference
-    if world_size > 1:
-        dist.barrier()
-    
-    try:
-        for batch in tqdm(dataloader, desc=f"Rank {rank} inference", disable=rank != 0):
-            batch = batch.to(device)
-            with torch.inference_mode():
-                outputs = model.generate(**batch, max_new_tokens=400, num_beams=4, early_stopping=True)
-            prompt_length = batch.input_ids.shape[1]
-            outputs = outputs[:, prompt_length:].cpu()
-            
-            for output in outputs:
-                pred = processor.tokenizer.decode(output, skip_special_tokens=True)
-                local_predictions.append(pred)
-    except Exception as e:
-        print(f"[Rank {rank}] Error during inference: {e}")
-        raise
-    
-    # Synchronize after inference
-    if world_size > 1:
-        dist.barrier()
-    
-    # Gather all predictions from all ranks
-    if world_size > 1:
-        # Gather predictions
-        all_predictions = [None] * world_size
-        dist.all_gather_object(all_predictions, local_predictions)
+    for batch_indices in batches:
+        batch_rows = [rows[i] for i in batch_indices]
         
-        # Flatten predictions
-        predictions = []
-        for preds in all_predictions:
-            predictions.extend(preds)
-    else:
-        predictions = local_predictions
+        # Prepare batch data
+        audio_paths = [row["audio_filepath"] for row in batch_rows]
+        references = [row["text"] for row in batch_rows]
+        target_langs = [row.get("target_lang", "English") for row in batch_rows]
+        prompts = [row.get("prompt", "Please transcribe the following audio to text<|audio|>") for row in batch_rows]
+        
+        # Load audio files
+        waveforms = [prepare_audio(path) for path in audio_paths]
+        
+        # Process inputs
+        inputs = processor(
+            text=prompts,
+            audio=waveforms,
+            return_tensors="pt",
+            padding=True,
+        )
+        inputs = inputs.to(device)
+        
+        # Generate
+        with torch.inference_mode():
+            outputs = model.generate(**inputs, max_new_tokens=400, num_beams=4, early_stopping=True)
+        
+        # Decode predictions
+        prompt_length = inputs.input_ids.shape[1]
+        outputs = outputs[:, prompt_length:].cpu()
+        
+        for i, output in enumerate(outputs):
+            pred = processor.tokenizer.decode(output, skip_special_tokens=True)
+            results.append((
+                audio_paths[i],
+                references[i],
+                pred,
+                target_langs[i]
+            ))
     
-    # Only rank 0 computes metrics
-    if rank != 0:
-        return None, None
-    
-    # Get references
-    references = dataset["text"]
-    target_langs = dataset["target_lang"]
-    
-    # Normalize texts
-    normalized_predictions = [normalize_text(text, lang) for text, lang in zip(predictions, target_langs)]
-    normalized_references = [normalize_text(text, lang) for text, lang in zip(references, target_langs)]
-    
-    # Import metrics
-    from torchmetrics.text import WordErrorRate
-    from torchmetrics.text import BLEUScore
-    
-    wer_metric = WordErrorRate()
-    bleu_metric = BLEUScore(n_gram=4)
-    
-    # Compute WER
-    for ref, hyp in zip(normalized_references, normalized_predictions):
-        wer_metric.update(hyp, ref)
-    wer = wer_metric.compute().item()
-    
-    # Compute BLEU
-    bleu_metric.update(normalized_predictions, [[ref] for ref in normalized_references])
-    bleu = bleu_metric.compute().item()
-    
-    return wer, bleu
+    return results
 
 
 def parse_args():
@@ -174,6 +139,7 @@ def main():
     
     # Setup distributed
     rank, world_size, local_rank = setup_distributed()
+    device = torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
     
     # Base model path for processor
     BASE_MODEL_PATH = "models/granite-4.0-1b-speech"
@@ -199,6 +165,8 @@ def main():
                 print(f"[1/4] Loading base model from {checkpoint_path}...")
             model, _ = load_model_and_processor(model_path=checkpoint_path)
         
+        model = model.to(device)
+        
         if rank == 0:
             print(f"[1/4] Model loaded successfully")
         
@@ -209,21 +177,62 @@ def main():
         if rank == 0:
             print("[2/4] Loading test dataset...")
         rows = load_metadata_rows(args.metadata, tokenizer=processor.tokenizer)
-        dataset = build_dataset(rows, processor)
         if rank == 0:
-            print(f"[2/4] Test samples: {len(dataset)}")
+            print(f"[2/4] Total test samples: {len(rows)}")
         
         if rank == 0:
-            print("[3/4] Computing metrics...")
-        wer, bleu = compute_metrics_distributed(
-            model, processor, dataset, 
+            print("[3/4] Running inference...")
+        
+        # Run inference (each rank processes its portion)
+        local_results = run_inference(
+            model, processor, rows, 
             batch_size=args.batch_size,
             rank=rank,
-            world_size=world_size
+            world_size=world_size,
+            device=device
         )
         
-        # Only rank 0 saves results
-        if rank == 0 and wer is not None and bleu is not None:
+        # Synchronize after inference
+        if world_size > 1:
+            dist.barrier()
+        
+        # Gather all results to rank 0
+        if world_size > 1:
+            gathered_results = [None] * world_size
+            dist.gather_object(local_results, gathered_results if rank == 0 else None)
+        else:
+            gathered_results = [local_results]
+        
+        # Only rank 0 computes metrics and saves results
+        if rank == 0:
+            # Flatten results from all ranks
+            all_results = list(itertools.chain(*gathered_results))
+            print(f"[3/4] Gathered {len(all_results)} results from {world_size} ranks")
+            
+            # Extract predictions and references
+            predictions = [r[2] for r in all_results]  # pred is at index 2
+            references = [r[1] for r in all_results]   # ref is at index 1
+            target_langs = [r[3] for r in all_results] # lang is at index 3
+            
+            # Normalize texts
+            normalized_predictions = [normalize_text(text, lang) for text, lang in zip(predictions, target_langs)]
+            normalized_references = [normalize_text(text, lang) for text, lang in zip(references, target_langs)]
+            
+            # Import metrics
+            from torchmetrics.text import WordErrorRate
+            from torchmetrics.text import BLEUScore
+            
+            # Compute WER
+            wer_metric = WordErrorRate()
+            for ref, hyp in zip(normalized_references, normalized_predictions):
+                wer_metric.update(hyp, ref)
+            wer = wer_metric.compute().item()
+            
+            # Compute BLEU
+            bleu_metric = BLEUScore(n_gram=4)
+            bleu_metric.update(normalized_predictions, [[ref] for ref in normalized_references])
+            bleu = bleu_metric.compute().item()
+            
             print(f"\n[4/4] Results:")
             print(f"  WER:  {wer * 100:.2f}%")
             print(f"  BLEU: {bleu * 100:.2f}")
@@ -232,19 +241,30 @@ def main():
             results = {
                 "checkpoint": str(args.checkpoint),
                 "metadata": str(args.metadata),
-                "num_samples": len(dataset),
+                "num_samples": len(all_results),
                 "wer": wer,
                 "bleu": bleu,
+                "samples": [
+                    {
+                        "audio": r[0],
+                        "reference": r[1],
+                        "prediction": r[2],
+                        "language": r[3]
+                    }
+                    for r in all_results
+                ]
             }
             
             with open(args.output, 'w', encoding='utf-8') as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
             print(f"\n[4/4] Results saved to {args.output}")
-        elif rank == 0:
-            print("[4/4] Failed to compute metrics")
-        
-        if rank == 0:
             print("[DONE] Inference completed successfully!")
+        
+    except Exception as e:
+        print(f"[Rank {rank}] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
         cleanup_distributed()
 
