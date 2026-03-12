@@ -36,19 +36,33 @@ def main():
     # Generate both ASR and AST tasks for each row
     combined_rows = []
     for row in rows:
+        audio_filepath = row.get("audio_filepath")
+        duration = row.get("duration")
+        source_lang = row.get("source_lang") or row.get("ori_lang")
+
         # ASR task - use original text
         if row.get("ori_text"):
-            asr_row = row.copy()
-            asr_row["task"] = "asr"
-            asr_row["text"] = row["ori_text"]
-            asr_row["target_lang"] = row.get("source_lang", row.get("ori_lang", "Vietnamese"))
+            asr_row = {
+                "audio_filepath": audio_filepath,
+                "duration": duration,
+                "task": "asr",
+                "source_lang": source_lang,
+                "target_lang": source_lang,
+                "text": row["ori_text"],
+            }
             combined_rows.append(asr_row)
 
         # AST task - use translated text
         if row.get("tgt_text"):
-            ast_row = row.copy()
-            ast_row["task"] = "ast"
-            ast_row["text"] = row["tgt_text"]
+            tgt_lang = row.get("target_lang") or row.get("tgt_lang")
+            ast_row = {
+                "audio_filepath": audio_filepath,
+                "duration": duration,
+                "task": "ast",
+                "source_lang": source_lang,
+                "target_lang": tgt_lang,
+                "text": row["tgt_text"],
+            }
             combined_rows.append(ast_row)
 
     write_jsonl(args.output, combined_rows)
