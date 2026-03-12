@@ -44,8 +44,12 @@ def load_model_and_processor(model_path, model_name, device_map=None):
 
 def build_instruction(task, source_lang, target_lang):
     if task == "asr":
+        if source_lang:
+            return f"Please transcribe the following audio in {source_lang} to text<|audio|>"
         return "Please transcribe the following audio to text<|audio|>"
     if task == "ast":
+        if source_lang and target_lang:
+            return f"Please translate the following audio from {source_lang} to {target_lang}<|audio|>"
         if target_lang:
             return f"Please translate the following audio to {target_lang}<|audio|>"
         return "Please translate the following audio to English<|audio|>"
