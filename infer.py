@@ -164,22 +164,29 @@ def main():
     # Setup distributed
     rank, world_size, local_rank = setup_distributed()
     
+    # Base model path for processor
+    BASE_MODEL_PATH = "models/granite-4.0-1b-speech"
+    
     try:
-        if rank == 0:
-            print(f"[1/4] Loading model and processor from {args.checkpoint}...")
-        
-        # Load processor from base model path
         checkpoint_path = Path(args.checkpoint)
-        base_model_path = checkpoint_path.parent if checkpoint_path.name.startswith("checkpoint-") else checkpoint_path
+        is_checkpoint = checkpoint_path.name.startswith("checkpoint-")
         
-        model, processor = load_model_and_processor(model_path=base_model_path)
+        if rank == 0:
+            print(f"[1/4] Loading processor from {BASE_MODEL_PATH}...")
         
-        # Load fine-tuned weights if checkpoint is specified
-        if checkpoint_path.name.startswith("checkpoint-"):
+        # Always load processor from base model
+        _, processor = load_model_and_processor(model_path=Path(BASE_MODEL_PATH))
+        
+        # Load model from checkpoint or base model
+        if is_checkpoint:
             if rank == 0:
-                print(f"[1/4] Loading fine-tuned weights from {checkpoint_path}...")
+                print(f"[1/4] Loading fine-tuned model from {checkpoint_path}...")
             from transformers.models.granite_speech import GraniteSpeechForConditionalGeneration
             model = GraniteSpeechForConditionalGeneration.from_pretrained(checkpoint_path)
+        else:
+            if rank == 0:
+                print(f"[1/4] Loading base model from {checkpoint_path}...")
+            model, _ = load_model_and_processor(model_path=checkpoint_path)
         
         if rank == 0:
             print(f"[1/4] Model loaded successfully")
