@@ -10,6 +10,7 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from utils import (
+    build_prompt,
     load_metadata_rows,
     load_model_and_processor,
     normalize_text,
@@ -74,7 +75,12 @@ def run_inference(model, processor, rows, batch_size, rank, world_size, device):
         audio_paths = [row["audio_filepath"] for row in batch_rows]
         references = [row["text"] for row in batch_rows]
         target_langs = [row.get("target_lang", "English") for row in batch_rows]
-        prompts = [row.get("prompt", "Please transcribe the following audio to text<|audio|>") for row in batch_rows]
+        source_langs = [row.get("source_lang", "English") for row in batch_rows]
+        tasks = [row.get("task", "asr") for row in batch_rows]
+        prompts = [
+            row.get("prompt") or build_prompt(None, task, src_lang, tgt_lang)
+            for row, task, src_lang, tgt_lang in zip(batch_rows, tasks, source_langs, target_langs)
+        ]
         
         # Load audio files
         waveforms = [prepare_audio(path) for path in audio_paths]
