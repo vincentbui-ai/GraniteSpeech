@@ -229,14 +229,14 @@ def main():
             from torchmetrics.text import WordErrorRate
             from torchmetrics.text import BLEUScore
             
-            # Compute WER
-            wer_metric = WordErrorRate()
+            # Compute WER (disable distributed sync since only rank 0 computes)
+            wer_metric = WordErrorRate(sync_on_compute=False)
             for ref, hyp in zip(normalized_references, normalized_predictions):
                 wer_metric.update(hyp, ref)
             wer = wer_metric.compute().item()
             
-            # Compute BLEU
-            bleu_metric = BLEUScore(n_gram=4)
+            # Compute BLEU (disable distributed sync since only rank 0 computes)
+            bleu_metric = BLEUScore(n_gram=4, sync_on_compute=False)
             bleu_metric.update(normalized_predictions, [[ref] for ref in normalized_references])
             bleu = bleu_metric.compute().item()
             
