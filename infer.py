@@ -202,6 +202,10 @@ def main():
         if rank == 0:
             print(f"[1/4] Model loaded successfully")
         
+        # Synchronize after model loading
+        if world_size > 1:
+            dist.barrier()
+        
         if rank == 0:
             print("[2/4] Loading test dataset...")
         rows = load_metadata_rows(args.metadata, tokenizer=processor.tokenizer)
