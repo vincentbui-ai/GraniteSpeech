@@ -136,8 +136,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run Granite Speech inference and compute metrics.")
     parser.add_argument(
         "--checkpoint",
-        required=True,
-        help="Path to checkpoint directory (e.g., outputs/granite-finetune/checkpoint-10000).",
+        default="models/granite-4.0-1b-speech",
+        help="Path to checkpoint directory (e.g., outputs/granite-finetune/checkpoint-10000). Defaults to base model.",
     )
     parser.add_argument(
         "--metadata",

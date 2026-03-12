@@ -6,7 +6,7 @@ export OMP_NUM_THREADS=1
 
 NUM_GPUS=4
 
-torchrun --nproc_per_node=${NUM_GPUS} infer.py \
+torchrun --nproc_per_node=${NUM_GPUS} --master_port=29500 infer.py \
   --checkpoint outputs/granite-finetune/checkpoint-10000 \
   --metadata datasets/test.jsonl \
   --output results.json \
