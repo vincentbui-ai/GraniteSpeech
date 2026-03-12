@@ -47,8 +47,75 @@ def parse_args():
 
 
 def freeze_non_adapter_params(model):
+    """Freeze all params except projector and LoRA adapter (PEFT)."""
     for name, parameter in model.named_parameters():
         parameter.requires_grad = "projector" in name or "lora" in name
+
+
+def unfreeze_adapter_params(model):
+    """Unfreeze only adapter components: projector and LoRA layers."""
+    for name, parameter in model.named_parameters():
+        parameter.requires_grad = "projector" in name or "lora" in name
+
+
+def freeze_base_model_params(model):
+    """Freeze base model, only train projector and LoRA."""
+    for name, parameter in model.named_parameters():
+        if "projector" in name or "lora" in name:
+            parameter.requires_grad = True
+        else:
+            parameter.requires_grad = False
+
+
+def unfreeze_all_params(model):
+    """Unfreeze all parameters for full fine-tuning."""
+    for name, parameter in model.named_parameters():
+        parameter.requires_grad = True
+
+
+def train_from_scratch(model):
+    """Reset and unfreeze all parameters for training from scratch.
+    
+    Warning: This will reinitialize model weights. Use with caution.
+    """
+    for name, parameter in model.named_parameters():
+        parameter.requires_grad = True
+        # Reinitialize weights
+        if len(parameter.shape) > 1:
+            torch.nn.init.xavier_uniform_(parameter)
+        else:
+            torch.nn.init.zeros_(parameter)
+
+
+def unfreeze_encoder_layers(model, num_layers=None):
+    """Unfreeze speech encoder layers for progressive training.
+    
+    Args:
+        num_layers: Number of encoder layers to unfreeze (from the end).
+                   If None, unfreeze all encoder layers.
+    """
+    for name, parameter in model.named_parameters():
+        if "encoder" in name.lower():
+            if num_layers is None:
+                parameter.requires_grad = True
+            else:
+                # Try to extract layer number from name
+                # Typical pattern: encoder.layers.X or encoder_layers.X
+                import re
+                match = re.search(r'layers?\.(\d+)', name)
+                if match:
+                    layer_num = int(match.group(1))
+                    total_layers = 24  # Assuming typical config
+                    if layer_num >= total_layers - num_layers:
+                        parameter.requires_grad = True
+                    else:
+                        parameter.requires_grad = False
+                else:
+                    parameter.requires_grad = False
+        else:
+            # Keep adapter frozen if not explicitly requested
+            if "projector" not in name and "lora" not in name:
+                parameter.requires_grad = False
 
 
 def build_trainer(model, processor, train_dataset, val_dataset, args):
