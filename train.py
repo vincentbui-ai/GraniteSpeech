@@ -1,6 +1,5 @@
 import argparse
 import os
-import re
 
 import torch
 from transformers import Trainer, TrainingArguments

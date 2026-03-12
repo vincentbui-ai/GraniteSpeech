@@ -1,11 +1,8 @@
-import hashlib
 import json
-import os
 from pathlib import Path
 
 import torch
 import tqdm
-from torch.utils.data import DataLoader
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.granite_speech import (
     GraniteSpeechForConditionalGeneration,
@@ -14,12 +11,7 @@ from transformers.models.granite_speech import (
 from whisper.normalizers import EnglishTextNormalizer
 
 
-NON_VERBAL_LABELS = {"<other>", "<noise>", "<music>", "<sil>"}
 ENGLISH_NORMALIZER = EnglishTextNormalizer()
-
-
-def get_device():
-    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def resolve_model_source(model_path, model_name):
@@ -53,18 +45,20 @@ def load_model_and_processor(model_path, model_name, device_map=None):
 def build_instruction(task, source_lang, target_lang):
     if task == "asr":
         return "Please transcribe the following audio to text<|audio|>"
-
-    if target_lang:
-        return f"Please translate the following audio to {target_lang}<|audio|>"
-    return "Please translate the following audio to English<|audio|>"
+    if task == "ast":
+        if target_lang:
+            return f"Please translate the following audio to {target_lang}<|audio|>"
+        return "Please translate the following audio to English<|audio|>"
+    raise ValueError(f"Unknown task: {task}")
 
 
 def build_prompt(tokenizer, task, source_lang, target_lang):
     instruction = build_instruction(task, source_lang, target_lang)
     if tokenizer is None:
         return instruction
+    chat = [dict(role="user", content=instruction)]
     return tokenizer.apply_chat_template(
-        [dict(role="user", content=instruction)],
+        chat,
         add_generation_prompt=True,
         tokenize=False,
     )
@@ -163,8 +157,6 @@ def build_dataset(rows, processor, skip_missing_audio=True):
         audio_path = Path(row["audio_filepath"])
         if skip_missing_audio and not audio_path.exists():
             continue
-        if row["text"] in NON_VERBAL_LABELS:
-            continue
         record = dict(row)
         record["audio"] = str(audio_path)
         records.append(record)
@@ -173,27 +165,6 @@ def build_dataset(rows, processor, skip_missing_audio=True):
     dataset = dataset.cast_column("audio", Audio(sampling_rate=processor.audio_processor.sampling_rate))
     
     return dataset
-
-
-def split_dataset(dataset, seed=42, val_ratio=0.1, test_ratio=0.1):
-    column_names = set(dataset.column_names)
-    if "split" in column_names:
-        train_dataset = dataset.filter(lambda row: row["split"] == "train")
-        val_dataset = dataset.filter(lambda row: row["split"] in {"validation", "val", "dev"})
-        test_dataset = dataset.filter(lambda row: row["split"] == "test")
-        if len(train_dataset) > 0:
-            return train_dataset, val_dataset, test_dataset
-
-    if test_ratio + val_ratio >= 1:
-        raise ValueError("val_ratio + test_ratio must be less than 1")
-
-    first_split = dataset.train_test_split(test_size=test_ratio, seed=seed)
-    train_val_dataset = first_split["train"]
-    test_dataset = first_split["test"]
-
-    adjusted_val_ratio = val_ratio / (1 - test_ratio)
-    second_split = train_val_dataset.train_test_split(test_size=adjusted_val_ratio, seed=seed)
-    return second_split["train"], second_split["test"], test_dataset
 
 
 def extract_audio_array(audio):
@@ -253,54 +224,3 @@ def normalize_text(text, target_lang):
     if target_lang and target_lang.lower() == "english":
         return ENGLISH_NORMALIZER(text)
     return " ".join(text.lower().strip().split())
-
-
-def compute_wer(model, processor, dataset, batch_size=16):
-    if dataset is None or len(dataset) == 0:
-        return None
-    
-    is_distributed = torch.distributed.is_available() and torch.distributed.is_initialized()
-    
-    if is_distributed:
-        torch.distributed.barrier()
-        if torch.distributed.get_rank() != 0:
-            return None
-        
-        # Unwrap DDP model và load lại trên 1 GPU
-        if hasattr(model, 'module'):
-            model = model.module
-    
-    from torchmetrics.text import WordErrorRate
-    wer_metric = WordErrorRate()
-    
-    # Load model trên GPU 0 duy nhất cho inference
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    model = model.to(device)
-    model.eval()
-    
-    collator = GraniteCollator(processor, inference_mode=True)
-    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collator, num_workers=0)
-    
-    predictions = []
-    for batch in tqdm.tqdm(dataloader, desc="Running inference"):
-        batch = batch.to(device)
-        with torch.inference_mode():
-            outputs = model.generate(**batch, max_new_tokens=400, num_beams=4, early_stopping=True)
-        prompt_length = batch.input_ids.shape[1]
-        outputs = outputs[:, prompt_length:].cpu()
-        for output in outputs:
-            predictions.append(processor.tokenizer.decode(output, skip_special_tokens=True))
-    
-    references = dataset["text"]
-    target_langs = dataset["target_lang"]
-    normalized_predictions = [normalize_text(text, lang) for text, lang in zip(predictions, target_langs)]
-    normalized_references = [normalize_text(text, lang) for text, lang in zip(references, target_langs)]
-    
-    for ref, hyp in zip(normalized_references, normalized_predictions):
-        wer_metric.update(hyp, ref)
-    result = wer_metric.compute().item()
-    
-    if is_distributed:
-        torch.distributed.barrier()
-    
-    return result
