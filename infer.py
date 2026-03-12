@@ -72,21 +72,32 @@ def compute_metrics_distributed(model, processor, dataset, batch_size=16, rank=0
     
     # Collect predictions on this rank
     local_predictions = []
-    local_indices = []
     
     if rank == 0:
         print(f"[INFO] Running distributed inference on {len(dataset)} samples with {world_size} GPUs...")
     
-    for batch in tqdm(dataloader, desc=f"Rank {rank} inference", disable=rank != 0):
-        batch = batch.to(device)
-        with torch.inference_mode():
-            outputs = model.generate(**batch, max_new_tokens=400, num_beams=4, early_stopping=True)
-        prompt_length = batch.input_ids.shape[1]
-        outputs = outputs[:, prompt_length:].cpu()
-        
-        for output in outputs:
-            pred = processor.tokenizer.decode(output, skip_special_tokens=True)
-            local_predictions.append(pred)
+    # Synchronize before starting inference
+    if world_size > 1:
+        dist.barrier()
+    
+    try:
+        for batch in tqdm(dataloader, desc=f"Rank {rank} inference", disable=rank != 0):
+            batch = batch.to(device)
+            with torch.inference_mode():
+                outputs = model.generate(**batch, max_new_tokens=400, num_beams=4, early_stopping=True)
+            prompt_length = batch.input_ids.shape[1]
+            outputs = outputs[:, prompt_length:].cpu()
+            
+            for output in outputs:
+                pred = processor.tokenizer.decode(output, skip_special_tokens=True)
+                local_predictions.append(pred)
+    except Exception as e:
+        print(f"[Rank {rank}] Error during inference: {e}")
+        raise
+    
+    # Synchronize after inference
+    if world_size > 1:
+        dist.barrier()
     
     # Gather all predictions from all ranks
     if world_size > 1:
