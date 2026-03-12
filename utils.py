@@ -14,8 +14,6 @@ from transformers.models.granite_speech import (
 from whisper.normalizers import EnglishTextNormalizer
 
 
-DEFAULT_MODEL_PATH = Path("models/granite-4.0-1b-speech")
-DEFAULT_MODEL_NAME = "ibm-granite/granite-4.0-1b-speech"
 NON_VERBAL_LABELS = {"<other>", "<noise>", "<music>", "<sil>"}
 ENGLISH_NORMALIZER = EnglishTextNormalizer()
 
@@ -24,19 +22,19 @@ def get_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def resolve_model_source(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME):
+def resolve_model_source(model_path, model_name):
     model_path = Path(model_path)
     if model_path.exists():
         return model_path
     return model_name
 
 
-def load_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME):
+def load_processor(model_path, model_name):
     model_source = resolve_model_source(model_path=model_path, model_name=model_name)
     return GraniteSpeechProcessor.from_pretrained(model_source)
 
 
-def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_MODEL_NAME, device_map=None):
+def load_model_and_processor(model_path, model_name, device_map=None):
     model_source = resolve_model_source(model_path=model_path, model_name=model_name)
     processor = GraniteSpeechProcessor.from_pretrained(model_source)
     
@@ -54,11 +52,11 @@ def load_model_and_processor(model_path=DEFAULT_MODEL_PATH, model_name=DEFAULT_M
 
 def build_instruction(task, source_lang, target_lang):
     if task == "asr":
-        return "<|audio|>can you transcribe the speech into a written format?"
+        return "Please transcribe the following audio to text<|audio|>"
 
     if target_lang:
-        return f"<|audio|>can you translate the speech into {target_lang}?"
-    return "<|audio|>can you translate the speech into English?"
+        return f"Please translate the following audio to {target_lang}<|audio|>"
+    return "Please translate the following audio to English<|audio|>"
 
 
 def build_prompt(tokenizer, task, source_lang, target_lang):

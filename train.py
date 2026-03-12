@@ -32,6 +32,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Finetune Granite Speech from metadata JSONL.")
     parser.add_argument("--train-files", nargs="+", required=True, help="Train JSONL files.")
     parser.add_argument("--val-files", nargs="+", required=True, help="Validation JSONL files.")
+    parser.add_argument("--model-path", default="models/granite-4.0-1b-speech", help="Path to local model directory.")
+    parser.add_argument("--model-name", default="ibm-granite/granite-4.0-1b-speech", help="HuggingFace model name.")
     parser.add_argument("--output-dir", default="outputs/granite-finetune", help="Output directory.")
     parser.add_argument("--epochs", type=float, default=1.0, help="Training epochs.")
     parser.add_argument("--learning-rate", type=float, default=3e-5, help="Learning rate.")
@@ -101,7 +103,7 @@ def main():
     args = parse_args()
     
     print("[1/5] Loading model and processor...")
-    model, processor = load_model_and_processor()
+    model, processor = load_model_and_processor(model_path=args.model_path, model_name=args.model_name)
     print(f"[1/5] Model loaded successfully")
 
     print("[2/5] Loading training dataset...")

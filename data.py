@@ -15,12 +15,22 @@ def parse_args():
         default="datasets/metadata.prepared.jsonl",
         help="Path to the normalized output JSONL file.",
     )
+    parser.add_argument(
+        "--model-path",
+        default="models/granite-4.0-1b-speech",
+        help="Path to local model directory.",
+    )
+    parser.add_argument(
+        "--model-name",
+        default="ibm-granite/granite-4.0-1b-speech",
+        help="HuggingFace model name.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    processor = load_processor()
+    processor = load_processor(args.model_path, args.model_name)
     rows = load_metadata_rows(args.input, tokenizer=processor.tokenizer)
     write_jsonl(args.output, rows)
     print(f"Prepared {len(rows)} samples -> {args.output}")

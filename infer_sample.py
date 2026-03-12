@@ -8,6 +8,8 @@ SAMPLE_AUDIO = "sample.wav"
 SOURCE_LANG = "Vietnamese"
 TARGET_LANG = "English"
 MAX_NEW_TOKENS = 256
+MODEL_PATH = "models/granite-4.0-1b-speech"
+MODEL_NAME = "ibm-granite/granite-4.0-1b-speech"
 
 
 def load_audio(audio_path, target_sample_rate):
@@ -43,7 +45,7 @@ def run_task(model, processor, audio, task, source_lang, target_lang, max_new_to
 
 
 def main():
-    model, processor = load_model_and_processor()
+    model, processor = load_model_and_processor(model_path=MODEL_PATH, model_name=MODEL_NAME)
     audio = load_audio(SAMPLE_AUDIO, processor.audio_processor.sampling_rate)
 
     asr_instruction, asr_prediction = run_task(

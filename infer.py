@@ -116,6 +116,16 @@ def parse_args():
         help="Path to checkpoint directory (e.g., outputs/granite-finetune/checkpoint-10000). Defaults to base model.",
     )
     parser.add_argument(
+        "--model-path",
+        default="models/granite-4.0-1b-speech",
+        help="Path to base model directory for processor.",
+    )
+    parser.add_argument(
+        "--model-name",
+        default="ibm-granite/granite-4.0-1b-speech",
+        help="HuggingFace model name.",
+    )
+    parser.add_argument(
         "--metadata",
         required=True,
         help="Path to test metadata JSONL file.",
@@ -141,18 +151,15 @@ def main():
     rank, world_size, local_rank = setup_distributed()
     device = torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
     
-    # Base model path for processor
-    BASE_MODEL_PATH = "models/granite-4.0-1b-speech"
-    
     try:
         checkpoint_path = Path(args.checkpoint)
         is_checkpoint = checkpoint_path.name.startswith("checkpoint-")
         
         if rank == 0:
-            print(f"[1/4] Loading processor from {BASE_MODEL_PATH}...")
+            print(f"[1/4] Loading processor from {args.model_path}...")
         
         # Always load processor from base model
-        _, processor = load_model_and_processor(model_path=Path(BASE_MODEL_PATH))
+        _, processor = load_model_and_processor(model_path=Path(args.model_path), model_name=args.model_name)
         
         # Load model from checkpoint or base model
         if is_checkpoint:
@@ -163,7 +170,7 @@ def main():
         else:
             if rank == 0:
                 print(f"[1/4] Loading base model from {checkpoint_path}...")
-            model, _ = load_model_and_processor(model_path=checkpoint_path)
+            model, _ = load_model_and_processor(model_path=checkpoint_path, model_name=args.model_name)
         
         model = model.to(device)
         
