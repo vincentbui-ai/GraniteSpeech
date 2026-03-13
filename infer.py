@@ -108,7 +108,8 @@ def run_inference(model, processor, rows, batch_size, rank, world_size, device):
                 audio_paths[i],
                 references[i],
                 pred,
-                target_langs[i]
+                target_langs[i],
+                tasks[i]  # Thêm task type
             ))
     
     return results
@@ -222,47 +223,103 @@ def main():
             all_results = list(itertools.chain(*gathered_results))
             print(f"[3/4] Gathered {len(all_results)} results from {world_size} ranks")
             
-            # Extract predictions and references
-            predictions = [r[2] for r in all_results]  # pred is at index 2
-            references = [r[1] for r in all_results]   # ref is at index 1
-            target_langs = [r[3] for r in all_results] # lang is at index 3
-            
-            # Normalize texts
-            normalized_predictions = [normalize_text(text, lang) for text, lang in zip(predictions, target_langs)]
-            normalized_references = [normalize_text(text, lang) for text, lang in zip(references, target_langs)]
-            
             # Import metrics
             from torchmetrics.text import WordErrorRate
             from torchmetrics.text import BLEUScore
             
-            # Compute WER (disable distributed sync since only rank 0 computes)
-            wer_metric = WordErrorRate(sync_on_compute=False)
-            for ref, hyp in zip(normalized_references, normalized_predictions):
-                wer_metric.update(hyp, ref)
-            wer = wer_metric.compute().item()
+            # Separate ASR and AST results
+            asr_results = [r for r in all_results if r[4] == "asr"]
+            ast_results = [r for r in all_results if r[4] == "ast"]
             
-            # Compute BLEU (disable distributed sync since only rank 0 computes)
+            def compute_metrics(results_subset, task_name):
+                """Compute WER and BLEU for a subset of results."""
+                if not results_subset:
+                    return None, None, 0
+                
+                predictions = [r[2] for r in results_subset]
+                references = [r[1] for r in results_subset]
+                target_langs = [r[3] for r in results_subset]
+                
+                # Normalize texts
+                normalized_predictions = [normalize_text(text, lang) for text, lang in zip(predictions, target_langs)]
+                normalized_references = [normalize_text(text, lang) for text, lang in zip(references, target_langs)]
+                
+                # Compute WER
+                wer_metric = WordErrorRate(sync_on_compute=False)
+                for ref, hyp in zip(normalized_references, normalized_predictions):
+                    wer_metric.update(hyp, ref)
+                wer = wer_metric.compute().item()
+                
+                # Compute BLEU
+                bleu_metric = BLEUScore(n_gram=4, sync_on_compute=False)
+                bleu_metric.update(normalized_predictions, [[ref] for ref in normalized_references])
+                bleu = bleu_metric.compute().item()
+                
+                return wer, bleu, len(results_subset)
+            
+            # Compute metrics for ASR
+            asr_wer, asr_bleu, asr_count = compute_metrics(asr_results, "ASR")
+            
+            # Compute metrics for AST
+            ast_wer, ast_bleu, ast_count = compute_metrics(ast_results, "AST")
+            
+            # Compute overall metrics
+            all_predictions = [r[2] for r in all_results]
+            all_references = [r[1] for r in all_results]
+            all_target_langs = [r[3] for r in all_results]
+            
+            normalized_all_predictions = [normalize_text(text, lang) for text, lang in zip(all_predictions, all_target_langs)]
+            normalized_all_references = [normalize_text(text, lang) for text, lang in zip(all_references, all_target_langs)]
+            
+            wer_metric = WordErrorRate(sync_on_compute=False)
+            for ref, hyp in zip(normalized_all_references, normalized_all_predictions):
+                wer_metric.update(hyp, ref)
+            overall_wer = wer_metric.compute().item()
+            
             bleu_metric = BLEUScore(n_gram=4, sync_on_compute=False)
-            bleu_metric.update(normalized_predictions, [[ref] for ref in normalized_references])
-            bleu = bleu_metric.compute().item()
+            bleu_metric.update(normalized_all_predictions, [[ref] for ref in normalized_all_references])
+            overall_bleu = bleu_metric.compute().item()
             
             print(f"\n[4/4] Results:")
-            print(f"  WER:  {wer * 100:.2f}%")
-            print(f"  BLEU: {bleu * 100:.2f}")
+            print(f"  Overall:")
+            print(f"    Total samples: {len(all_results)}")
+            print(f"    WER:  {overall_wer * 100:.2f}%")
+            print(f"    BLEU: {overall_bleu * 100:.2f}")
+            if asr_count > 0:
+                print(f"  ASR ({asr_count} samples):")
+                print(f"    WER:  {asr_wer * 100:.2f}%")
+                print(f"    BLEU: {asr_bleu * 100:.2f}")
+            if ast_count > 0:
+                print(f"  AST ({ast_count} samples):")
+                print(f"    WER:  {ast_wer * 100:.2f}%")
+                print(f"    BLEU: {ast_bleu * 100:.2f}")
             
             # Save results
             results = {
                 "checkpoint": str(args.checkpoint),
                 "metadata": str(args.metadata),
                 "num_samples": len(all_results),
-                "wer": wer,
-                "bleu": bleu,
+                "overall": {
+                    "wer": overall_wer,
+                    "bleu": overall_bleu
+                },
+                "asr": {
+                    "num_samples": asr_count,
+                    "wer": asr_wer if asr_count > 0 else None,
+                    "bleu": asr_bleu if asr_count > 0 else None
+                },
+                "ast": {
+                    "num_samples": ast_count,
+                    "wer": ast_wer if ast_count > 0 else None,
+                    "bleu": ast_bleu if ast_count > 0 else None
+                },
                 "samples": [
                     {
                         "audio": r[0],
                         "reference": r[1],
                         "prediction": r[2],
-                        "language": r[3]
+                        "language": r[3],
+                        "task": r[4]
                     }
                     for r in all_results
                 ]
