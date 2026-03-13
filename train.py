@@ -2,6 +2,7 @@ import argparse
 import os
 
 import torch
+from peft import LoraConfig, get_peft_model
 from transformers import Trainer, TrainingArguments
 
 from utils import (
@@ -71,6 +72,35 @@ def unfreeze_all_params(model):
     """Unfreeze all parameters for full fine-tuning."""
     for name, parameter in model.named_parameters():
         parameter.requires_grad = True
+
+
+def apply_lora(model, r=8, lora_alpha=16, lora_dropout=0.05, target_modules=None):
+    """Apply LoRA to model with specified rank.
+    
+    Args:
+        model: The base model to apply LoRA
+        r: LoRA rank (default: 8)
+        lora_alpha: LoRA alpha parameter (default: 16)
+        lora_dropout: Dropout rate for LoRA layers (default: 0.05)
+        target_modules: List of module names to apply LoRA (default: ["q_proj", "v_proj"])
+    
+    Returns:
+        Model with LoRA applied
+    """
+    if target_modules is None:
+        target_modules = ["q_proj", "v_proj"]
+    
+    lora_config = LoraConfig(
+        r=r,
+        lora_alpha=lora_alpha,
+        target_modules=target_modules,
+        lora_dropout=lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    
+    model = get_peft_model(model, lora_config)
+    return model
 
 
 def train_from_scratch(model):
