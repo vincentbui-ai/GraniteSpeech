@@ -78,7 +78,7 @@ def run_inference(model, processor, rows, batch_size, rank, world_size, device):
         source_langs = [row.get("source_lang", "English") for row in batch_rows]
         tasks = [row.get("task", "asr") for row in batch_rows]
         prompts = [
-            row.get("prompt") or build_prompt(None, task, src_lang, tgt_lang)
+            row.get("prompt") or build_prompt(processor.tokenizer, task, src_lang, tgt_lang)
             for row, task, src_lang, tgt_lang in zip(batch_rows, tasks, source_langs, target_langs)
         ]
         
