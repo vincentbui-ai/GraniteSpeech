@@ -9,12 +9,28 @@ import torchaudio
 import torch.distributed as dist
 from tqdm import tqdm
 
+import string
+
 from utils import (
     build_prompt,
     load_metadata_rows,
     load_model_and_processor,
     normalize_text,
 )
+
+
+def remove_punctuation(text):
+    return text.translate(str.maketrans("", "", string.punctuation))
+
+
+def filter_short_sentences(rows, min_words=5):
+    filtered = []
+    for row in rows:
+        text = row.get("text", "")
+        word_count = len(text.split())
+        if word_count >= min_words:
+            filtered.append(row)
+    return filtered
 
 
 def setup_distributed():
@@ -191,8 +207,13 @@ def main():
         if rank == 0:
             print("[2/4] Loading test dataset...")
         rows = load_metadata_rows(args.metadata, tokenizer=processor.tokenizer)
+        
+        # Filter out short sentences (< 5 words)
         if rank == 0:
-            print(f"[2/4] Total test samples: {len(rows)}")
+            print(f"[2/4] Filtering short sentences (< 5 words)...")
+        rows = filter_short_sentences(rows, min_words=5)
+        if rank == 0:
+            print(f"[2/4] Total test samples after filtering: {len(rows)}")
         
         if rank == 0:
             print("[3/4] Running inference...")
@@ -257,11 +278,35 @@ def main():
                 
                 return wer, bleu, len(results_subset)
             
+            def compute_metrics_clean(results_subset, task_name):
+                """Compute WER and BLEU with punctuation removed and lowercased."""
+                if not results_subset:
+                    return None, None, 0
+                
+                predictions = [r[2] for r in results_subset]
+                references = [r[1] for r in results_subset]
+                
+                clean_predictions = [" ".join(remove_punctuation(text).lower().split()) for text in predictions]
+                clean_references = [" ".join(remove_punctuation(text).lower().split()) for text in references]
+                
+                wer_metric = WordErrorRate(sync_on_compute=False)
+                for ref, hyp in zip(clean_references, clean_predictions):
+                    wer_metric.update(hyp, ref)
+                wer = wer_metric.compute().item()
+                
+                bleu_metric = BLEUScore(n_gram=4, sync_on_compute=False)
+                bleu_metric.update(clean_predictions, [[ref] for ref in clean_references])
+                bleu = bleu_metric.compute().item()
+                
+                return wer, bleu, len(results_subset)
+            
             # Compute metrics for ASR
             asr_wer, asr_bleu, asr_count = compute_metrics(asr_results, "ASR")
+            asr_wer_clean, asr_bleu_clean, _ = compute_metrics_clean(asr_results, "ASR")
             
             # Compute metrics for AST
             ast_wer, ast_bleu, ast_count = compute_metrics(ast_results, "AST")
+            ast_wer_clean, ast_bleu_clean, _ = compute_metrics_clean(ast_results, "AST")
             
             # Compute overall metrics
             all_predictions = [r[2] for r in all_results]
@@ -280,19 +325,28 @@ def main():
             bleu_metric.update(normalized_all_predictions, [[ref] for ref in normalized_all_references])
             overall_bleu = bleu_metric.compute().item()
             
+            # Compute clean metrics (no punctuation, lowercase)
+            overall_wer_clean, overall_bleu_clean, _ = compute_metrics_clean(all_results, "Overall")
+            
             print(f"\n[4/4] Results:")
             print(f"  Overall:")
             print(f"    Total samples: {len(all_results)}")
             print(f"    WER:  {overall_wer * 100:.2f}%")
             print(f"    BLEU: {overall_bleu * 100:.2f}")
+            print(f"    WER (no punct, lower):  {overall_wer_clean * 100:.2f}%")
+            print(f"    BLEU (no punct, lower): {overall_bleu_clean * 100:.2f}")
             if asr_count > 0:
                 print(f"  ASR ({asr_count} samples):")
                 print(f"    WER:  {asr_wer * 100:.2f}%")
                 print(f"    BLEU: {asr_bleu * 100:.2f}")
+                print(f"    WER (no punct, lower):  {asr_wer_clean * 100:.2f}%")
+                print(f"    BLEU (no punct, lower): {asr_bleu_clean * 100:.2f}")
             if ast_count > 0:
                 print(f"  AST ({ast_count} samples):")
                 print(f"    WER:  {ast_wer * 100:.2f}%")
                 print(f"    BLEU: {ast_bleu * 100:.2f}")
+                print(f"    WER (no punct, lower):  {ast_wer_clean * 100:.2f}%")
+                print(f"    BLEU (no punct, lower): {ast_bleu_clean * 100:.2f}")
             
             # Save results
             results = {
@@ -301,17 +355,23 @@ def main():
                 "num_samples": len(all_results),
                 "overall": {
                     "wer": overall_wer,
-                    "bleu": overall_bleu
+                    "bleu": overall_bleu,
+                    "wer_clean": overall_wer_clean,
+                    "bleu_clean": overall_bleu_clean
                 },
                 "asr": {
                     "num_samples": asr_count,
                     "wer": asr_wer if asr_count > 0 else None,
-                    "bleu": asr_bleu if asr_count > 0 else None
+                    "bleu": asr_bleu if asr_count > 0 else None,
+                    "wer_clean": asr_wer_clean if asr_count > 0 else None,
+                    "bleu_clean": asr_bleu_clean if asr_count > 0 else None
                 },
                 "ast": {
                     "num_samples": ast_count,
                     "wer": ast_wer if ast_count > 0 else None,
-                    "bleu": ast_bleu if ast_count > 0 else None
+                    "bleu": ast_bleu if ast_count > 0 else None,
+                    "wer_clean": ast_wer_clean if ast_count > 0 else None,
+                    "bleu_clean": ast_bleu_clean if ast_count > 0 else None
                 },
                 "samples": [
                     {
