@@ -44,7 +44,19 @@ def parse_args():
     parser.add_argument("--save-total-limit", type=int, default=3, help="Keep only N most recent checkpoints")
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
     parser.add_argument("--resume-from", type=str, default="", help="Resume from specific checkpoint path")
+    parser.add_argument("--max-duration", type=float, default=None, help="Filter out audio longer than N seconds.")
     return parser.parse_args()
+
+
+def filter_by_duration(rows, max_duration):
+    if max_duration is None:
+        return rows
+    filtered = []
+    for row in rows:
+        duration = row.get("duration", float("inf"))
+        if duration <= max_duration:
+            filtered.append(row)
+    return filtered
 
 
 def freeze_non_adapter_params(model):
@@ -188,10 +200,11 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
     )
 
 
-def load_and_merge(files, processor):
+def load_and_merge(files, processor, max_duration=None):
     rows = []
     for f in files:
         rows.extend(load_metadata_rows(f, tokenizer=processor.tokenizer))
+    rows = filter_by_duration(rows, max_duration)
     return build_dataset(rows, processor)
 
 
@@ -203,11 +216,11 @@ def main():
     print(f"[1/5] Model loaded successfully")
 
     print("[2/5] Loading training dataset...")
-    train_dataset = load_and_merge(args.train_files, processor)
+    train_dataset = load_and_merge(args.train_files, processor, max_duration=args.max_duration)
     print(f"[2/5] Training samples: {len(train_dataset)}")
 
     print("[3/5] Loading validation dataset...")
-    val_dataset = load_and_merge(args.val_files, processor)
+    val_dataset = load_and_merge(args.val_files, processor, max_duration=args.max_duration)
     print(f"[3/5] Validation samples: {len(val_dataset)}")
 
     print("[4/5] Starting training...")
