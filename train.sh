@@ -20,4 +20,5 @@ torchrun --nproc_per_node=${NUM_GPUS} train.py \
   --eval-batch-size 4 \
   --gradient-accumulation-steps 2 \
   --save-steps 10000 \
-  --save-total-limit 3 
+  --save-total-limit 3 \
+  --max-duration 20 
