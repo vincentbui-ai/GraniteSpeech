@@ -3,7 +3,7 @@ import os
 
 import torch
 from peft import LoraConfig, get_peft_model
-from transformers import Trainer, TrainingArguments
+from transformers import EarlyStoppingCallback, Trainer, TrainingArguments
 
 from utils import (
     GraniteCollator,
@@ -45,6 +45,7 @@ def parse_args():
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
     parser.add_argument("--resume-from", type=str, default="", help="Resume from specific checkpoint path")
     parser.add_argument("--max-duration", type=float, default=None, help="Filter out audio longer than N seconds.")
+    parser.add_argument("--early-stopping-patience", type=int, default=None, help="Early stopping patience (number of eval steps without improvement).")
     return parser.parse_args()
 
 
@@ -167,6 +168,9 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
     total_steps = (len(train_dataset) // (args.train_batch_size * args.gradient_accumulation_steps)) * args.epochs
     warmup_steps = int(total_steps * 0.2)
     
+    # Early stopping requires load_best_model_at_end=True
+    use_early_stopping = args.early_stopping_patience is not None and len(val_dataset) > 0
+    
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         remove_unused_columns=False,
@@ -189,7 +193,15 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
         data_seed=42,
         ddp_find_unused_parameters=False,
         dataloader_drop_last=False,
+        load_best_model_at_end=use_early_stopping,
+        metric_for_best_model="eval_loss" if use_early_stopping else None,
+        greater_is_better=False if use_early_stopping else None,
     )
+    
+    callbacks = []
+    if use_early_stopping:
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=args.early_stopping_patience))
+    
     return Trainer(
         model=model,
         args=training_args,
@@ -197,6 +209,7 @@ def build_trainer(model, processor, train_dataset, val_dataset, args):
         eval_dataset=val_dataset if len(val_dataset) > 0 else None,
         data_collator=GraniteCollator(processor),
         processing_class=processor,
+        callbacks=callbacks if callbacks else None,
     )
 
 
