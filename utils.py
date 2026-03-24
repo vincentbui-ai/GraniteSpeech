@@ -1,6 +1,8 @@
 import json
+import logging
 from pathlib import Path
 
+import numpy as np
 import torch
 import tqdm
 from transformers.feature_extraction_utils import BatchFeature
@@ -173,8 +175,11 @@ def build_dataset(rows, processor, skip_missing_audio=True):
 
 def extract_audio_array(audio):
     if hasattr(audio, "get_all_samples"):
-        samples = audio.get_all_samples()
-        return samples.data.squeeze(0).numpy()
+        try:
+            samples = audio.get_all_samples()
+            return samples.data.squeeze(0).numpy()
+        except Exception:
+            return None
     if isinstance(audio, dict):
         return audio["array"]
     return audio
@@ -188,6 +193,19 @@ class GraniteCollator:
     def __call__(self, examples):
         prompts = [example["prompt"] for example in examples]
         audios = [extract_audio_array(example["audio"]) for example in examples]
+
+        # Replace failed audio decodes with 1s of silence (16kHz fallback)
+        dummy_audio = np.zeros(16000, dtype=np.float32)
+        n_replaced = 0
+        bad_indices = set()
+        for i, a in enumerate(audios):
+            if a is None:
+                audios[i] = dummy_audio
+                bad_indices.add(i)
+                n_replaced += 1
+        if n_replaced > 0:
+            logging.warning(f"Replaced {n_replaced}/{len(audios)} bad audio samples with silence")
+
         processed = self.processor(
             prompts,
             audios,
@@ -200,7 +218,12 @@ class GraniteCollator:
         labels = None
 
         if not self.inference_mode:
-            targets = [example["text"] + self.processor.tokenizer.eos_token for example in examples]
+            # Blank text for samples where audio decoding failed
+            eos = self.processor.tokenizer.eos_token
+            targets = [
+                eos if i in bad_indices else example["text"] + eos
+                for i, example in enumerate(examples)
+            ]
             targets = self.processor.tokenizer(
                 targets,
                 return_tensors="pt",
